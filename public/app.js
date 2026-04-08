@@ -18,12 +18,12 @@ function localPuzzleNumber() {
   const d = new Date();
   d.setHours(0, 0, 0, 0);                       // local midnight
   const epoch = new Date(2021, 5, 19);           // June 19 2021 local midnight
-  return Math.floor((d - epoch) / 86400000) + 1;
+  return Math.floor((d - epoch) / 86400000);
 }
 
 function dateFromPuzzle(num) {
   const epoch = new Date(2021, 5, 19);
-  const d = new Date(epoch.getTime() + (num - 1) * 86400000);
+  const d = new Date(epoch.getTime() + num * 86400000);
   return [
     d.getFullYear(),
     String(d.getMonth() + 1).padStart(2, '0'),
