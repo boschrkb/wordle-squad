@@ -34,7 +34,7 @@
     <button class="tab-btn"        data-tab="scorecard" role="tab">📊 Scoreboard</button>
     <button class="tab-btn"        data-tab="stats"    role="tab">🎯 My Scorecard</button>
     <button class="tab-btn"        data-tab="locker"   role="tab">🏆 Champions</button>
-    <button class="tab-btn"        data-tab="rules"    role="tab">📋 Rules</button>
+    <button class="tab-btn"        data-tab="rules"    role="tab">📋 Setup &amp; Rules</button>
   </nav>
 
   <main>
@@ -100,6 +100,17 @@
         <div id="daily-leaderboard"><div class="state-msg">No scores yet — first on the tee! ⛳</div></div>
         <button id="share-btn" class="btn btn-whatsapp btn-full share-btn">
           📤 Share Scorecard to WhatsApp
+        </button>
+      </div>
+
+      <!-- Manual paste fallback -->
+      <div class="card">
+        <div class="card-title">✍️ Forgot to Copy First?</div>
+        <p class="forgot-note">⚠️ No problem — paste your Wordle share text manually in the box below:</p>
+        <textarea id="manual-paste-input" class="manual-paste-area"
+          placeholder="Paste your Wordle share text here…&#10;&#10;e.g.  Wordle 1,234 3/6&#10;&#10;⬛🟨⬛⬛⬛&#10;🟩⬛🟨⬛⬛&#10;🟩🟩🟩🟩🟩" rows="6"></textarea>
+        <button id="detect-manual-btn" class="btn btn-gold btn-full" style="margin-top:8px">
+          🔍 Detect Score from Text
         </button>
       </div>
 
@@ -189,10 +200,69 @@
       <div id="hall-of-fame"><div class="state-msg">Loading…</div></div>
     </section>
 
-    <!-- ═══════════════════ RULES ═══════════════════════ -->
+    <!-- ═══════════════════ SETUP & RULES ════════════════ -->
     <section id="tab-rules" class="tab-section hidden">
 
+      <!-- ── HOW TO PLAY ── -->
       <div class="rules-header">
+        <div class="rules-crest">🏌️</div>
+        <div class="rules-club">THE AUGUSTA WORDLE COMMITTEE</div>
+        <div class="rules-title">HOW TO PLAY</div>
+        <div class="rules-subtitle">The Official Daily Setup Guide</div>
+      </div>
+
+      <div class="steps-card">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-body">
+            <div class="step-title">Finish your Wordle ⬛🟨🟩</div>
+            <div class="step-desc">Complete today's puzzle in the Wordle app as normal.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-body">
+            <div class="step-title">Tap Share → tap <span class="step-highlight">COPY</span> ⚠️</div>
+            <div class="step-desc">This is critical — you must tap <strong>Copy</strong> (not just Share) so your score is on the clipboard. Do this <em>before</em> opening WhatsApp.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <div class="step-body">
+            <div class="step-title">Open WhatsApp → paste to the group 💬</div>
+            <div class="step-desc">Long-press the message box and paste your score into the group chat.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">4</div>
+          <div class="step-body">
+            <div class="step-title">Tap the pinned link to open Wordle Squad 📌</div>
+            <div class="step-desc">Find the pinned message in the WhatsApp group and tap the link to open this app.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">5</div>
+          <div class="step-body">
+            <div class="step-title">Tap "📋 Read Clipboard" — score appears automatically ✨</div>
+            <div class="step-desc">On the Today's Round tab, tap the paste button. Your round and result are detected instantly.</div>
+          </div>
+        </div>
+        <div class="step last">
+          <div class="step-num">6</div>
+          <div class="step-body">
+            <div class="step-title">Enter your name → tap Submit 🏌️</div>
+            <div class="step-desc">Select your name from the dropdown and tap <strong>Post Score</strong>. You're on the leaderboard!</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="forgot-banner">
+        ⚠️ <strong>Forgot to Copy first?</strong> No problem — go back to Today's Round and
+        paste your Wordle share text manually in the box at the bottom of the page.
+      </div>
+
+      <!-- ── OFFICIAL RULES ── -->
+      <div class="rules-header" style="margin-top:20px">
         <div class="rules-crest">⛳</div>
         <div class="rules-club">THE AUGUSTA WORDLE COMMITTEE</div>
         <div class="rules-title">THE WORDLE OPEN</div>

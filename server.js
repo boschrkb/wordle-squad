@@ -75,8 +75,9 @@ app.get('/api/leaderboard/daily', (req, res) => {
   res.json(db.getDailyLeaderboard(date));
 });
 
-app.get('/api/leaderboard/season', (_req, res) => {
-  res.json(db.getSeasonLeaderboard());
+app.get('/api/leaderboard/season', (req, res) => {
+  const date = req.query.date || db.getTodayDate();
+  res.json(db.getSeasonLeaderboard(date));
 });
 
 app.get('/api/leaderboard/monthly', (req, res) => {
