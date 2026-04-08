@@ -3,10 +3,10 @@ const { DatabaseSync } = require('node:sqlite');
 const path = require('path');
 const fs   = require('fs');
 
-// DB lives in ./data/ — survives restarts, git pulls, and npm installs.
-// Override with DB_PATH env var for cloud deployments with a persistent volume.
+// DB path: use env vars for cloud (Railway persistent volume), fall back to local data/ dir.
+// On Railway: set DB_PATH=/data/scores.db and mount a Volume at /data.
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
-const DB_PATH  = process.env.DB_PATH  || path.join(DATA_DIR, 'wordle-open.db');
+const DB_PATH  = process.env.DB_PATH  || path.join(DATA_DIR, 'scores.db');
 
 // Create data directory if it doesn't exist (never drops existing data)
 fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -60,26 +60,38 @@ db.exec(`
   );
 `);
 
+// ─── Startup integrity check ──────────────────────────────
+{
+  const playerCount = db.prepare('SELECT COUNT(*) AS n FROM players').get().n;
+  const scoreCount  = db.prepare('SELECT COUNT(*) AS n FROM scores').get().n;
+  console.log(`[db] Loaded — ${playerCount} players, ${scoreCount} scores`);
+}
+
 // ─── Helpers ──────────────────────────────────────────────
 const WORDLE_EPOCH = new Date('2021-06-19T12:00:00Z').getTime();
 const DAY_MS = 86400000;
 const PAR = 4;
 
+// Seasons: fixed 18-round blocks. Season 1 = puzzles 1754–1771, Season 2 = 1772–1789, …
+const SEASON_EPOCH  = 1754;
+const SEASON_LENGTH = 18;
+
+function currentSeasonBounds(puzzleNum) {
+  const idx   = Math.floor((puzzleNum - SEASON_EPOCH) / SEASON_LENGTH);
+  const start = SEASON_EPOCH + idx * SEASON_LENGTH;
+  return { start, end: start + SEASON_LENGTH - 1 };
+}
+
 function puzzleToDate(num) {
-  return new Date(WORDLE_EPOCH + (num - 1) * DAY_MS).toISOString().split('T')[0];
+  return new Date(WORDLE_EPOCH + num * DAY_MS).toISOString().split('T')[0];
 }
 
 function dateToPuzzle(dateStr) {
-  return Math.floor((new Date(dateStr + 'T12:00:00Z').getTime() - WORDLE_EPOCH) / DAY_MS) + 1;
+  return Math.floor((new Date(dateStr + 'T12:00:00Z').getTime() - WORDLE_EPOCH) / DAY_MS);
 }
 
 function todayStr() {
   return new Date().toISOString().split('T')[0];
-}
-
-function seasonStart(dateStr) {
-  const d = new Date((dateStr || todayStr()) + 'T12:00:00Z');
-  return new Date(d.getTime() - 17 * DAY_MS).toISOString().split('T')[0];
 }
 
 function getWeekBounds(dateStr) {
@@ -133,11 +145,10 @@ function submitScore(playerId, puzzleNumber, guesses, date) {
   return { playerId, puzzleNumber, date: scoreDate, guesses, strokes };
 }
 
-function getPlayerSeasonRounds(playerId, dateStr) {
-  const start = seasonStart(dateStr);
-  const end   = dateStr || todayStr();
+function getPlayerSeasonRounds(playerId, puzzleNum) {
+  const { start, end } = currentSeasonBounds(puzzleNum);
   const row = db.prepare(
-    'SELECT COUNT(*) AS cnt FROM scores WHERE player_id = ? AND date BETWEEN ? AND ?'
+    'SELECT COUNT(*) AS cnt FROM scores WHERE player_id = ? AND puzzle_number BETWEEN ? AND ?'
   ).get(playerId, start, end);
   return row ? row.cnt : 0;
 }
@@ -154,48 +165,31 @@ function getDailyLeaderboard(date) {
   return rows.map(r => ({ ...r, vs_par: r.strokes - PAR }));
 }
 
-// ─── Season leaderboard (18-day rolling) ──────────────────
-function getSeasonLeaderboard(dateStr) {
-  const today = dateStr || todayStr();
-  const start = seasonStart(today);
+// ─── Season leaderboard (fixed 18-round block by puzzle number) ───────────
+function getSeasonLeaderboard(puzzleNum) {
+  const pNum = puzzleNum || dateToPuzzle(todayStr());
+  const { start, end } = currentSeasonBounds(pNum);
   const rows = db.prepare(`
     SELECT p.id, p.name,
            SUM(s.strokes)  AS total_strokes,
            COUNT(s.id)     AS rounds_played,
            ROUND(AVG(CAST(s.strokes AS REAL)), 2) AS avg_strokes
     FROM   scores s JOIN players p ON p.id = s.player_id
-    WHERE  s.date BETWEEN ? AND ?
+    WHERE  s.puzzle_number BETWEEN ? AND ?
     GROUP  BY p.id, p.name
-    ORDER  BY avg_strokes ASC, total_strokes ASC
-  `).all(start, today);
+    ORDER  BY total_strokes ASC, rounds_played DESC
+  `).all(start, end);
   return {
     rows: rows.map(r => ({
       ...r,
-      vs_par: Math.round((r.avg_strokes - PAR) * r.rounds_played),
-      season_vs_par: fmtVsPar(Math.round((r.avg_strokes - PAR) * r.rounds_played)),
+      vs_par:       r.total_strokes - r.rounds_played * PAR,
+      season_vs_par: fmtVsPar(r.total_strokes - r.rounds_played * PAR),
     })),
-    season_start: start,
-    season_end:   today,
+    season_start_puzzle: start,
+    season_end_puzzle:   end,
+    season_start_date:   puzzleToDate(start),
+    season_end_date:     puzzleToDate(end),
   };
-}
-
-// ─── Monthly leaderboard ──────────────────────────────────
-function getMonthlyLeaderboard(month) {
-  const rows = db.prepare(`
-    SELECT p.id, p.name,
-           SUM(s.strokes)  AS total_strokes,
-           COUNT(s.id)     AS rounds_played,
-           ROUND(AVG(CAST(s.strokes AS REAL)), 2) AS avg_strokes,
-           MIN(s.strokes)  AS best_round
-    FROM   scores s JOIN players p ON p.id = s.player_id
-    WHERE  strftime('%Y-%m', s.date) = ?
-    GROUP  BY p.id, p.name
-    ORDER  BY avg_strokes ASC, total_strokes ASC
-  `).all(month);
-  return rows.map(r => ({
-    ...r,
-    season_vs_par: fmtVsPar(r.total_strokes - r.rounds_played * PAR),
-  }));
 }
 
 // ─── All-time leaderboard ─────────────────────────────────
@@ -368,14 +362,15 @@ function checkAndStartPlayoff() {
   // Don't start if one is already active
   if (db.prepare("SELECT id FROM playoffs WHERE status = 'active' LIMIT 1").get()) return null;
 
-  const { rows } = getSeasonLeaderboard();
-  // Require players to have completed the full 18-round season
-  const complete = rows.filter(r => r.rounds_played >= 18);
+  const puzzleNum = dateToPuzzle(todayStr());
+  const { rows }  = getSeasonLeaderboard(puzzleNum);
+  // Require players to have completed the full season
+  const complete = rows.filter(r => r.rounds_played >= SEASON_LENGTH);
   if (complete.length < 2) return null;
 
-  // Compare avg_strokes rounded to 2dp (as stored)
-  const topAvg = Math.round(parseFloat(complete[0].avg_strokes) * 100);
-  const tied   = complete.filter(r => Math.round(parseFloat(r.avg_strokes) * 100) === topAvg);
+  // Tie = identical total strokes after all 18 rounds
+  const topStrokes = complete[0].total_strokes;
+  const tied       = complete.filter(r => r.total_strokes === topStrokes);
   if (tied.length < 2) return null;
 
   const today = todayStr();
@@ -432,6 +427,73 @@ function processPlayoffDay(date) {
   return getActivePlayoff();
 }
 
+// ─── Group stats ──────────────────────────────────────────
+function getGroupStats() {
+  const totalRounds = db.prepare('SELECT COUNT(*) AS n FROM scores').get().n;
+  const avgRow      = db.prepare('SELECT ROUND(AVG(CAST(strokes AS REAL)), 2) AS avg FROM scores').get();
+  const bestRow     = db.prepare(`
+    SELECT s.strokes, s.puzzle_number, p.name
+    FROM scores s JOIN players p ON p.id = s.player_id
+    ORDER BY s.strokes ASC, s.created_at ASC LIMIT 1
+  `).get();
+  const birdieCount = db.prepare('SELECT COUNT(*) AS n FROM scores WHERE strokes <= 2').get().n;
+  const topBirdie   = db.prepare(`
+    SELECT p.name, COUNT(*) AS birdies
+    FROM scores s JOIN players p ON p.id = s.player_id
+    WHERE s.strokes <= 2
+    GROUP BY p.id ORDER BY birdies DESC LIMIT 1
+  `).get();
+
+  return {
+    total_rounds:      totalRounds,
+    group_avg:         avgRow?.avg ?? null,
+    best_round:        bestRow ? { strokes: bestRow.strokes, puzzle: bestRow.puzzle_number, name: bestRow.name } : null,
+    total_birdies:     birdieCount,
+    top_birdie_player: topBirdie ?? null,
+  };
+}
+
+// ─── Season champions ─────────────────────────────────────
+function getSeasonChampions() {
+  const currentPuzzle = dateToPuzzle(todayStr());
+  const champions = [];
+  let idx = 0;
+  while (true) {
+    const start = SEASON_EPOCH + idx * SEASON_LENGTH;
+    const end   = start + SEASON_LENGTH - 1;
+    if (end >= currentPuzzle) break; // season still in progress or hasn't started
+    // Get all players who played this season, ranked by total strokes
+    const rows = db.prepare(`
+      SELECT p.id, p.name,
+             SUM(s.strokes)  AS total_strokes,
+             COUNT(s.id)     AS rounds_played
+      FROM scores s JOIN players p ON p.id = s.player_id
+      WHERE s.puzzle_number BETWEEN ? AND ?
+      GROUP BY p.id, p.name
+      ORDER BY total_strokes ASC
+    `).all(start, end);
+    if (rows.length > 0) {
+      const top = rows[0].total_strokes;
+      champions.push({
+        season:       idx + 1,
+        start_puzzle: start,
+        end_puzzle:   end,
+        start_date:   puzzleToDate(start),
+        end_date:     puzzleToDate(end),
+        winners:      rows.filter(r => r.total_strokes === top).map(r => ({
+          name:         r.name,
+          total_strokes: r.total_strokes,
+          rounds_played: r.rounds_played,
+          vs_par:       fmtVsPar(r.total_strokes - r.rounds_played * PAR),
+        })),
+      });
+    }
+    idx++;
+    if (idx > 200) break; // safety guard
+  }
+  return champions.reverse(); // most recent first
+}
+
 module.exports = {
   getPlayers,
   createOrGetPlayer,
@@ -443,8 +505,9 @@ module.exports = {
   getDateForPuzzle:     puzzleToDate,
   getDailyLeaderboard,
   getSeasonLeaderboard,
-  getMonthlyLeaderboard,
   getAllTimeLeaderboard,
+  getGroupStats,
+  getSeasonChampions,
   getPlayerStats,
   getHallOfFame,
   getShareText,

@@ -1,0 +1,14 @@
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "npm start"
+restartPolicyType = "on_failure"
+
+# ── Persistent storage for SQLite ─────────────────────────
+# In the Railway dashboard:
+#   1. Go to your service → Volumes → Add Volume
+#   2. Mount path: /data
+#   3. Set environment variable: DB_PATH=/data/scores.db
+#
+# This ensures scores survive every redeploy.

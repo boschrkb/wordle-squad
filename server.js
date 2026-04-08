@@ -12,12 +12,13 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 function broadcast() {
-  const today = db.getTodayDate();
+  const today  = db.getTodayDate();
+  const puzzle = db.getTodayPuzzleNumber();
   io.emit('update', {
     daily:         db.getDailyLeaderboard(today),
-    season:        db.getSeasonLeaderboard(),
+    season:        db.getSeasonLeaderboard(puzzle),
     playoff:       db.getActivePlayoff(),
-    puzzle_number: db.getTodayPuzzleNumber(),
+    puzzle_number: puzzle,
     today_date:    today,
   });
 }
@@ -54,8 +55,7 @@ app.post('/api/scores', (req, res) => {
     const clientDate   = typeof req.body.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.body.date)
                          ? req.body.date : null;
     const score        = db.submitScore(Number(player_id), Number(puzzle_number), g, clientDate);
-    const today        = db.getTodayDate();
-    const seasonRounds = db.getPlayerSeasonRounds(Number(player_id), today);
+    const seasonRounds = db.getPlayerSeasonRounds(Number(player_id), Number(puzzle_number));
 
     // Playoff: check if season just completed with a tie, then resolve today's playoff day
     db.checkAndStartPlayoff();
@@ -79,17 +79,22 @@ app.get('/api/leaderboard/daily', (req, res) => {
 });
 
 app.get('/api/leaderboard/season', (req, res) => {
-  const date = req.query.date || db.getTodayDate();
-  res.json(db.getSeasonLeaderboard(date));
-});
-
-app.get('/api/leaderboard/monthly', (req, res) => {
-  const month = req.query.month || db.getTodayDate().slice(0, 7);
-  res.json(db.getMonthlyLeaderboard(month));
+  const puzzle = req.query.puzzle ? Number(req.query.puzzle) : db.getTodayPuzzleNumber();
+  res.json(db.getSeasonLeaderboard(puzzle));
 });
 
 app.get('/api/leaderboard/alltime', (_req, res) => {
   res.json(db.getAllTimeLeaderboard());
+});
+
+// ── Group stats & Season champions ────────────────────────
+
+app.get('/api/stats/group', (_req, res) => {
+  res.json(db.getGroupStats());
+});
+
+app.get('/api/seasons/champions', (_req, res) => {
+  res.json(db.getSeasonChampions());
 });
 
 // ── Stats ─────────────────────────────────────────────────
@@ -134,11 +139,12 @@ app.get('/api/today', (_req, res) => {
 // ── Socket.IO ─────────────────────────────────────────────
 
 io.on('connection', socket => {
-  const today = db.getTodayDate();
+  const today  = db.getTodayDate();
+  const puzzle = db.getTodayPuzzleNumber();
   socket.emit('update', {
     daily:         db.getDailyLeaderboard(today),
-    season:        db.getSeasonLeaderboard(),
-    puzzle_number: db.getTodayPuzzleNumber(),
+    season:        db.getSeasonLeaderboard(puzzle),
+    puzzle_number: puzzle,
     today_date:    today,
   });
 });

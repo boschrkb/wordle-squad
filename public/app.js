@@ -45,9 +45,7 @@ const S = {
   todayDate:     localToday(),
   todayPuzzle:   localPuzzleNumber(),
   activeTab:     'today',
-  activeSub:     'monthly',
   seasonLoaded:  false,
-  monthlyLoaded: false,
   alltimeLoaded: false,
   fameLoaded:    false,
   dailyData:     [],
@@ -134,6 +132,7 @@ function switchTab(name) {
     s.classList.toggle('active', on);
     s.classList.toggle('hidden', !on);
   });
+  if (name === 'today')     fetchDailyLeaderboard();
   if (name === 'season')    loadSeason();
   if (name === 'scorecard') loadScorecard();
   if (name === 'locker' && !S.fameLoaded) loadFame();
@@ -144,7 +143,6 @@ document.querySelectorAll('.sub-tab').forEach(btn => {
 });
 
 function switchSub(name) {
-  S.activeSub = name;
   document.querySelectorAll('.sub-tab').forEach(b =>
     b.classList.toggle('active', b.dataset.sub === name));
   document.querySelectorAll('.sub-panel').forEach(p => {
@@ -152,8 +150,6 @@ function switchSub(name) {
     p.classList.toggle('active', on);
     p.classList.toggle('hidden', !on);
   });
-  if (name === 'monthly' && !S.monthlyLoaded) fetchMonthly();
-  if (name === 'alltime'  && !S.alltimeLoaded) fetchAlltime();
 }
 
 // ─── Players ──────────────────────────────────────────────
@@ -290,6 +286,9 @@ document.getElementById('score-form').addEventListener('submit', async e => {
     document.getElementById('puzzle-number').value     = S.todayPuzzle;
     document.getElementById('round-badge').textContent = `Round ${S.todayPuzzle}`;
 
+    // Always re-fetch with local date so The Green updates instantly
+    fetchDailyLeaderboard();
+
     if (result.completed_18th) {
       const playerName = S.players.find(p => p.id === playerId)?.name ?? 'You';
       triggerCelebration(playerName, result);
@@ -406,8 +405,8 @@ function renderPlayoffBanner(playoff) {
 // ─── Season ───────────────────────────────────────────────
 function loadSeason() {
   if (S.seasonData) renderSeason(S.seasonData);
-  // Pass local date so season window is correct for player's timezone
-  apiFetch(`/api/leaderboard/season?date=${S.todayDate}`)
+  // Pass local puzzle number so season bounds are correct for player's timezone
+  apiFetch(`/api/leaderboard/season?puzzle=${S.todayPuzzle}`)
     .then(data => { S.seasonData = data; renderSeason(data); })
     .catch(() => {});
   apiFetch('/api/playoff')
@@ -416,9 +415,11 @@ function loadSeason() {
 }
 
 function renderSeason(data) {
-  const { rows, season_start, season_end } = data;
+  const { rows, season_start_puzzle, season_end_puzzle, season_start_date, season_end_date } = data;
+  const startLbl = season_start_date ? fmtDateShort(season_start_date) : `Round ${season_start_puzzle}`;
+  const endLbl   = season_end_date   ? fmtDateShort(season_end_date)   : `Round ${season_end_puzzle}`;
   document.getElementById('season-range').textContent =
-    `${fmtDateShort(season_start)} → ${fmtDateShort(season_end)}`;
+    `Rounds ${season_start_puzzle}–${season_end_puzzle} · ${startLbl} → ${endLbl}`;
 
   const pod = document.getElementById('season-podium');
   if (!rows.length) {
@@ -429,21 +430,19 @@ function renderSeason(data) {
 
   const icons = ['🏆','🥈','🥉'], pos = ['p1','p2','p3'];
   pod.innerHTML = `<div class="podium-wrap">${rows.slice(0,3).map((r, i) => {
-    const vpd  = parseFloat(r.avg_strokes) - 4;
-    const vStr = fmtVsPar(Math.round(vpd * r.rounds_played));
+    const vpd  = r.total_strokes - r.rounds_played * 4;
     return `
       <div class="podium-slot ${pos[i]}">
         <div class="podium-icon">${icons[i]}</div>
         <div class="podium-name">${esc(r.name)}</div>
-        <div class="podium-score ${parClass(vpd)}">${vStr}</div>
+        <div class="podium-score ${parClass(vpd)}">${fmtVsPar(vpd)}</div>
         <div class="podium-rounds">${r.rounds_played}/18 rounds</div>
         <div class="podium-block"></div>
       </div>`; }).join('')}</div>`;
 
   document.getElementById('season-leaderboard').innerHTML = rows.map((r, i) => {
-    const vpd  = parseFloat(r.avg_strokes) - 4;
-    const vStr = fmtVsPar(Math.round(vpd * r.rounds_played));
-    const tied = i > 0 && r.avg_strokes === rows[i-1].avg_strokes;
+    const vpd  = r.total_strokes - r.rounds_played * 4;
+    const tied = i > 0 && r.total_strokes === rows[i-1].total_strokes && r.rounds_played === rows[i-1].rounds_played;
     return `
       <div class="sb-row ${i < 3 ? `r${i+1}` : ''}">
         <div class="sb-pos ${tied ? 'tied' : ''}">${tied ? `T${i+1}` : i+1}</div>
@@ -452,31 +451,80 @@ function renderSeason(data) {
           <div class="sb-sub">avg ${r.avg_strokes} · hdcp ${fmtVsPar(Math.round((parseFloat(r.avg_strokes)-4)*10)/10)}</div>
         </div>
         <div class="sb-rounds">${r.rounds_played}/18</div>
-        <div class="sb-score ${parClass(vpd)}">${vStr}<small>total</small></div>
+        <div class="sb-score ${parClass(vpd)}">${fmtVsPar(vpd)}<small>${r.total_strokes} strokes</small></div>
       </div>`; }).join('');
 }
 
 // ─── Scoreboard ───────────────────────────────────────────
 function loadScorecard() {
-  if (!S.monthlyLoaded) fetchMonthly();
+  fetchGroupStats();
+  fetchSeasonChampions();
+  if (!S.alltimeLoaded) fetchAlltime();
 }
-async function fetchMonthly() {
-  const month = S.todayDate.slice(0, 7); // local month
+
+async function fetchGroupStats() {
   try {
-    const rows = await apiFetch(`/api/leaderboard/monthly?month=${month}`);
-    S.monthlyLoaded = true;
-    renderRankings('monthly-leaderboard', rows);
+    const s = await apiFetch('/api/stats/group');
+    renderGroupStats(s);
   } catch {}
 }
+
+function renderGroupStats(s) {
+  const el = document.getElementById('group-stats');
+  if (!s || s.total_rounds === 0) {
+    el.innerHTML = '<div class="state-msg">No rounds played yet ⛳</div>';
+    return;
+  }
+  const best = s.best_round
+    ? `${s.best_round.strokes} strokes (${s.best_round.name}, Round ${s.best_round.puzzle})`
+    : '—';
+  const birdieKing = s.top_birdie_player
+    ? `${s.top_birdie_player.name} (${s.top_birdie_player.birdies})`
+    : '—';
+  el.innerHTML = `
+    <div class="group-stats-grid">
+      <div class="gs-item"><div class="gs-val">${s.total_rounds}</div><div class="gs-lbl">Total Rounds</div></div>
+      <div class="gs-item"><div class="gs-val">${s.group_avg ?? '—'}</div><div class="gs-lbl">Group Avg</div></div>
+      <div class="gs-item gs-wide"><div class="gs-val">${best}</div><div class="gs-lbl">Best Single Round</div></div>
+      <div class="gs-item"><div class="gs-val">${s.total_birdies}</div><div class="gs-lbl">Total Birdies (≤2)</div></div>
+      <div class="gs-item"><div class="gs-val">${birdieKing}</div><div class="gs-lbl">Birdie King</div></div>
+    </div>`;
+}
+
+async function fetchSeasonChampions() {
+  try {
+    const seasons = await apiFetch('/api/seasons/champions');
+    renderSeasonChampions(seasons);
+  } catch {}
+}
+
+function renderSeasonChampions(seasons) {
+  const el = document.getElementById('season-champs');
+  if (!seasons.length) {
+    el.innerHTML = '<div class="state-msg">No completed seasons yet — Season 1 wraps after Round 1771 ⛳</div>';
+    return;
+  }
+  el.innerHTML = seasons.map(s => {
+    const winners = s.winners.map(w => `${w.name} (${w.vs_par})`).join(', ');
+    return `
+      <div class="champ-row">
+        <div class="champ-season">Season ${s.season}</div>
+        <div class="champ-dates">${fmtDateShort(s.start_date)} – ${fmtDateShort(s.end_date)}</div>
+        <div class="champ-winner">🏆 ${winners}</div>
+      </div>`;
+  }).join('');
+}
+
 async function fetchAlltime() {
   try {
     const rows = await apiFetch('/api/leaderboard/alltime');
     S.alltimeLoaded = true;
-    renderRankings('alltime-leaderboard', rows);
+    renderAlltime(rows);
   } catch {}
 }
-function renderRankings(elId, rows) {
-  const el = document.getElementById(elId);
+
+function renderAlltime(rows) {
+  const el = document.getElementById('alltime-leaderboard');
   if (!rows.length) { el.innerHTML = '<div class="state-msg">No rounds played yet ⛳</div>'; return; }
   el.innerHTML = rows.map((r, i) => {
     const vpd  = parseFloat(r.avg_strokes) - 4;
@@ -493,13 +541,6 @@ function renderRankings(elId, rows) {
         <div class="sb-score ${parClass(vpd)}">${vStr}<small>${r.total_strokes} total</small></div>
       </div>`; }).join('');
 }
-
-document.querySelectorAll('.sub-tab').forEach(b => {
-  b.addEventListener('click', () => {
-    if (b.dataset.sub === 'alltime'  && !S.alltimeLoaded) fetchAlltime();
-    if (b.dataset.sub === 'monthly'  && !S.monthlyLoaded) fetchMonthly();
-  });
-});
 
 // ─── Player Stats ─────────────────────────────────────────
 document.getElementById('stats-player-select').addEventListener('change', function() {
@@ -586,7 +627,10 @@ async function init() {
 
   await loadPlayers();
 
-  // Load today's leaderboard with local date
+  fetchDailyLeaderboard();
+}
+
+function fetchDailyLeaderboard() {
   apiFetch(`/api/leaderboard/daily?date=${S.todayDate}`)
     .then(entries => { S.dailyData = entries; renderDailyLeaderboard(entries); })
     .catch(() => {});

@@ -662,3 +662,64 @@ select option { background: var(--surface); color: var(--cream); }
   .scoreboard-header,
   .sb-row     { grid-template-columns: 32px 1fr 58px 60px; }
 }
+
+/* ═══ Group Stats ══════════════════════════════════════════ */
+.group-stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  padding: 4px 0;
+}
+.gs-item {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  text-align: center;
+}
+.gs-item.gs-wide {
+  grid-column: 1 / -1;
+}
+.gs-val {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--gold);
+  line-height: 1.2;
+  margin-bottom: 4px;
+  word-break: break-word;
+}
+.gs-lbl {
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+
+/* ═══ Season Champions ═════════════════════════════════════ */
+.champ-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.champ-row:last-child { border-bottom: none; }
+.champ-season {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--gold);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  min-width: 68px;
+}
+.champ-dates {
+  font-size: 11px;
+  color: var(--muted);
+  flex: 1;
+}
+.champ-winner {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--cream);
+}
