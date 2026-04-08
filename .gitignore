@@ -1,6 +1,8 @@
 node_modules/
 
-# Database files — stored in data/ which is tracked, but the files themselves are not
+# Data files — stored in data/ which is tracked, but the files themselves are not
+data/*.json
+data/*.json.tmp
 data/*.db
 data/*.db-shm
 data/*.db-wal

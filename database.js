@@ -1,69 +1,38 @@
-const Database = require('better-sqlite3');
 const path = require('path');
 const fs   = require('fs');
 
-// DB path: use env vars for cloud (Railway persistent volume), fall back to local data/ dir.
-// On Railway: set DB_PATH=/data/scores.db and mount a Volume at /data.
+// Storage: a single JSON file. No npm packages, no compilation, works everywhere.
+// On Railway: set DB_PATH=/data/scores.json and mount a Volume at /data.
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
-const DB_PATH  = process.env.DB_PATH  || path.join(DATA_DIR, 'scores.db');
+const DB_PATH  = process.env.DB_PATH  || path.join(DATA_DIR, 'scores.json');
 
-// Create data directory if it doesn't exist (never drops existing data)
 fs.mkdirSync(DATA_DIR, { recursive: true });
+console.log(`[db] Using storage at: ${DB_PATH}`);
 
-console.log(`[db] Using database at: ${DB_PATH}`);
-const db = new Database(DB_PATH);
+// ─── JSON read / write ────────────────────────────────────
+function readDB() {
+  try {
+    return JSON.parse(fs.readFileSync(DB_PATH, 'utf8'));
+  } catch {
+    return { players: [], scores: [], playoffs: [], playoff_players: [] };
+  }
+}
 
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
-db.exec(`
-  CREATE TABLE IF NOT EXISTS players (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    name       TEXT UNIQUE NOT NULL COLLATE NOCASE,
-    created_at TEXT DEFAULT (datetime('now'))
-  );
+function writeDB(data) {
+  // Write to a temp file then rename for atomic replacement
+  const tmp = DB_PATH + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
+  fs.renameSync(tmp, DB_PATH);
+}
 
-  CREATE TABLE IF NOT EXISTS scores (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    player_id     INTEGER NOT NULL,
-    puzzle_number INTEGER NOT NULL,
-    date          TEXT    NOT NULL,
-    guesses       INTEGER NOT NULL CHECK(guesses >= 0 AND guesses <= 6),
-    strokes       INTEGER NOT NULL,  -- golf: 1-6 for solved, 7 for X (penalty stroke)
-    created_at    TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (player_id) REFERENCES players(id),
-    UNIQUE(player_id, puzzle_number)
-  );
+function nextId(arr) {
+  return arr.length === 0 ? 1 : Math.max(...arr.map(x => x.id)) + 1;
+}
 
-  CREATE INDEX IF NOT EXISTS idx_scores_date   ON scores(date);
-  CREATE INDEX IF NOT EXISTS idx_scores_player ON scores(player_id);
-`);
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS playoffs (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    status       TEXT NOT NULL DEFAULT 'active',   -- 'active' | 'complete'
-    winner_id    INTEGER,
-    started_date TEXT NOT NULL,
-    ended_date   TEXT,
-    created_at   TEXT DEFAULT (datetime('now'))
-  );
-
-  CREATE TABLE IF NOT EXISTS playoff_players (
-    playoff_id INTEGER NOT NULL,
-    player_id  INTEGER NOT NULL,
-    status     TEXT NOT NULL DEFAULT 'active',     -- 'active' | 'eliminated' | 'winner'
-    elim_date  TEXT,
-    PRIMARY KEY (playoff_id, player_id),
-    FOREIGN KEY (playoff_id) REFERENCES playoffs(id),
-    FOREIGN KEY (player_id)  REFERENCES players(id)
-  );
-`);
-
-// ─── Startup integrity check ──────────────────────────────
+// ─── Startup log ──────────────────────────────────────────
 {
-  const playerCount = db.prepare('SELECT COUNT(*) AS n FROM players').get().n;
-  const scoreCount  = db.prepare('SELECT COUNT(*) AS n FROM scores').get().n;
-  console.log(`[db] Loaded — ${playerCount} players, ${scoreCount} scores`);
+  const { players, scores } = readDB();
+  console.log(`[db] Loaded — ${players.length} players, ${scores.length} scores`);
 }
 
 // ─── Helpers ──────────────────────────────────────────────
@@ -94,12 +63,12 @@ function todayStr() {
 }
 
 function getWeekBounds(dateStr) {
-  const d   = new Date(dateStr + 'T12:00:00Z');
-  const day = d.getUTCDay();
+  const d     = new Date(dateStr + 'T12:00:00Z');
+  const day   = d.getUTCDay();
   const toMon = day === 0 ? -6 : 1 - day;
-  const mon = new Date(d.getTime() + toMon * DAY_MS);
-  const sun = new Date(mon.getTime() + 6 * DAY_MS);
-  const fmt = x => x.toISOString().split('T')[0];
+  const mon   = new Date(d.getTime() + toMon * DAY_MS);
+  const sun   = new Date(mon.getTime() + 6 * DAY_MS);
+  const fmt   = x => x.toISOString().split('T')[0];
   return { start: fmt(mon), end: fmt(sun) };
 }
 
@@ -109,81 +78,104 @@ function weekLabel(start, end) {
   return `${fmt(start)} – ${fmt(end)}, ${end.slice(0, 4)}`;
 }
 
-function vsPar(strokes, rounds) {
-  return strokes - rounds * PAR;
-}
-
 function fmtVsPar(diff) {
   if (diff === 0) return 'E';
   return diff < 0 ? `${diff}` : `+${diff}`;
 }
 
+// Group scores by player_id → { total_strokes, rounds_played, ... }
+function groupByPlayer(scores, players, extra = () => ({})) {
+  const map = new Map();
+  for (const s of scores) {
+    if (!map.has(s.player_id)) {
+      const p = players.find(pl => pl.id === s.player_id);
+      map.set(s.player_id, { id: s.player_id, name: p?.name ?? 'Unknown', total_strokes: 0, rounds_played: 0 });
+    }
+    const e = map.get(s.player_id);
+    e.total_strokes += s.strokes;
+    e.rounds_played += 1;
+    Object.assign(e, extra(e, s));
+  }
+  return [...map.values()];
+}
+
 // ─── Players ──────────────────────────────────────────────
 function getPlayers() {
-  return db.prepare('SELECT id, name FROM players ORDER BY name COLLATE NOCASE').all();
+  const { players } = readDB();
+  return [...players]
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
+    .map(p => ({ id: p.id, name: p.name }));
 }
 
 function createOrGetPlayer(name) {
-  let p = db.prepare('SELECT id, name FROM players WHERE name = ?').get(name);
-  if (!p) {
-    const r = db.prepare('INSERT INTO players (name) VALUES (?)').run(name);
-    p = { id: r.lastInsertRowid, name };
-  }
-  return p;
+  const data = readDB();
+  const existing = data.players.find(p => p.name.toLowerCase() === name.toLowerCase());
+  if (existing) return { id: existing.id, name: existing.name };
+  const p = { id: nextId(data.players), name, created_at: new Date().toISOString() };
+  data.players.push(p);
+  writeDB(data);
+  return { id: p.id, name: p.name };
 }
 
 // ─── Scores ───────────────────────────────────────────────
 function submitScore(playerId, puzzleNumber, guesses, date) {
-  // Golf: strokes = guesses (1-6), or 7 for X (penalty stroke)
-  const strokes = guesses === 0 ? 7 : guesses;
-  // Prefer the client-supplied local date; fall back to server UTC derivation
+  const strokes   = guesses === 0 ? 7 : guesses;
   const scoreDate = date || puzzleToDate(puzzleNumber);
-  db.prepare(
-    'INSERT INTO scores (player_id, puzzle_number, date, guesses, strokes) VALUES (?,?,?,?,?)'
-  ).run(playerId, puzzleNumber, scoreDate, guesses, strokes);
+  const data      = readDB();
+  if (data.scores.find(s => s.player_id === playerId && s.puzzle_number === puzzleNumber)) {
+    throw new Error('UNIQUE constraint failed: scores already submitted for this round');
+  }
+  const score = {
+    id: nextId(data.scores),
+    player_id: playerId,
+    puzzle_number: puzzleNumber,
+    date: scoreDate,
+    guesses,
+    strokes,
+    created_at: new Date().toISOString(),
+  };
+  data.scores.push(score);
+  writeDB(data);
   return { playerId, puzzleNumber, date: scoreDate, guesses, strokes };
 }
 
 function getPlayerSeasonRounds(playerId, puzzleNum) {
   const { start, end } = currentSeasonBounds(puzzleNum);
-  const row = db.prepare(
-    'SELECT COUNT(*) AS cnt FROM scores WHERE player_id = ? AND puzzle_number BETWEEN ? AND ?'
-  ).get(playerId, start, end);
-  return row ? row.cnt : 0;
+  const { scores } = readDB();
+  return scores.filter(s => s.player_id === playerId && s.puzzle_number >= start && s.puzzle_number <= end).length;
 }
 
 // ─── Daily leaderboard ────────────────────────────────────
 function getDailyLeaderboard(date) {
-  const rows = db.prepare(`
-    SELECT p.id, p.name, s.guesses, s.strokes, s.puzzle_number, s.date
-    FROM   scores s JOIN players p ON p.id = s.player_id
-    WHERE  s.date = ?
-    ORDER  BY s.strokes ASC, s.created_at ASC
-  `).all(date);
-  // Add vs-par
-  return rows.map(r => ({ ...r, vs_par: r.strokes - PAR }));
+  const { players, scores } = readDB();
+  return scores
+    .filter(s => s.date === date)
+    .sort((a, b) => a.strokes - b.strokes || a.created_at.localeCompare(b.created_at))
+    .map(s => {
+      const p = players.find(pl => pl.id === s.player_id);
+      return { id: s.id, name: p?.name ?? 'Unknown', guesses: s.guesses, strokes: s.strokes, puzzle_number: s.puzzle_number, date: s.date, vs_par: s.strokes - PAR };
+    });
 }
 
-// ─── Season leaderboard (fixed 18-round block by puzzle number) ───────────
+// ─── Season leaderboard ───────────────────────────────────
 function getSeasonLeaderboard(puzzleNum) {
   const pNum = puzzleNum || dateToPuzzle(todayStr());
   const { start, end } = currentSeasonBounds(pNum);
-  const rows = db.prepare(`
-    SELECT p.id, p.name,
-           SUM(s.strokes)  AS total_strokes,
-           COUNT(s.id)     AS rounds_played,
-           ROUND(AVG(CAST(s.strokes AS REAL)), 2) AS avg_strokes
-    FROM   scores s JOIN players p ON p.id = s.player_id
-    WHERE  s.puzzle_number BETWEEN ? AND ?
-    GROUP  BY p.id, p.name
-    ORDER  BY total_strokes ASC, rounds_played DESC
-  `).all(start, end);
-  return {
-    rows: rows.map(r => ({
+  const { players, scores } = readDB();
+
+  const seasonScores = scores.filter(s => s.puzzle_number >= start && s.puzzle_number <= end);
+  const grouped = groupByPlayer(seasonScores, players);
+  const rows = grouped
+    .sort((a, b) => a.total_strokes - b.total_strokes || b.rounds_played - a.rounds_played)
+    .map(r => ({
       ...r,
+      avg_strokes:  r.rounds_played > 0 ? (r.total_strokes / r.rounds_played).toFixed(2) : null,
       vs_par:       r.total_strokes - r.rounds_played * PAR,
       season_vs_par: fmtVsPar(r.total_strokes - r.rounds_played * PAR),
-    })),
+    }));
+
+  return {
+    rows,
     season_start_puzzle: start,
     season_end_puzzle:   end,
     season_start_date:   puzzleToDate(start),
@@ -193,132 +185,174 @@ function getSeasonLeaderboard(puzzleNum) {
 
 // ─── All-time leaderboard ─────────────────────────────────
 function getAllTimeLeaderboard() {
-  const rows = db.prepare(`
-    SELECT p.id, p.name,
-           SUM(s.strokes)  AS total_strokes,
-           COUNT(s.id)     AS rounds_played,
-           ROUND(AVG(CAST(s.strokes AS REAL)), 2) AS avg_strokes,
-           MIN(s.strokes)  AS best_round,
-           SUM(CASE WHEN s.guesses = 0 THEN 1 ELSE 0 END) AS penalty_rounds
-    FROM   scores s JOIN players p ON p.id = s.player_id
-    GROUP  BY p.id, p.name
-    ORDER  BY avg_strokes ASC, total_strokes ASC
-  `).all();
-  return rows.map(r => ({
-    ...r,
-    season_vs_par: fmtVsPar(r.total_strokes - r.rounds_played * PAR),
-  }));
+  const { players, scores } = readDB();
+  const map = new Map();
+  for (const s of scores) {
+    if (!map.has(s.player_id)) {
+      const p = players.find(pl => pl.id === s.player_id);
+      map.set(s.player_id, { id: s.player_id, name: p?.name ?? 'Unknown', total_strokes: 0, rounds_played: 0, best_round: null, penalty_rounds: 0 });
+    }
+    const e = map.get(s.player_id);
+    e.total_strokes  += s.strokes;
+    e.rounds_played  += 1;
+    e.penalty_rounds += s.guesses === 0 ? 1 : 0;
+    if (e.best_round === null || s.strokes < e.best_round) e.best_round = s.strokes;
+  }
+  return [...map.values()]
+    .sort((a, b) => {
+      const avgA = a.rounds_played > 0 ? a.total_strokes / a.rounds_played : Infinity;
+      const avgB = b.rounds_played > 0 ? b.total_strokes / b.rounds_played : Infinity;
+      return avgA - avgB || a.total_strokes - b.total_strokes;
+    })
+    .map(r => ({
+      ...r,
+      avg_strokes:  r.rounds_played > 0 ? (r.total_strokes / r.rounds_played).toFixed(2) : null,
+      season_vs_par: fmtVsPar(r.total_strokes - r.rounds_played * PAR),
+    }));
 }
 
 // ─── Player stats ─────────────────────────────────────────
 function getPlayerStats(playerId) {
-  const player = db.prepare('SELECT id, name FROM players WHERE id = ?').get(playerId);
+  const { players, scores } = readDB();
+  const player = players.find(p => p.id === playerId);
   if (!player) return null;
 
-  const scores = db.prepare(
-    'SELECT * FROM scores WHERE player_id = ? ORDER BY puzzle_number ASC'
-  ).all(playerId);
+  const ps = scores
+    .filter(s => s.player_id === playerId)
+    .sort((a, b) => a.puzzle_number - b.puzzle_number);
 
-  const dist = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0 }; // 7 = X/6
+  const dist = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0 };
   let totalStrokes = 0;
-  scores.forEach(s => {
-    dist[s.strokes] = (dist[s.strokes] || 0) + 1;
-    totalStrokes += s.strokes;
-  });
+  for (const s of ps) { dist[s.strokes] = (dist[s.strokes] || 0) + 1; totalStrokes += s.strokes; }
 
-  const total       = scores.length;
-  const underPar    = scores.filter(s => s.strokes < PAR).length;
-  const penalties   = scores.filter(s => s.guesses === 0).length;
-  const bestRound   = total > 0 ? Math.min(...scores.map(s => s.strokes)) : null;
-  const avgStrokes  = total > 0 ? (totalStrokes / total).toFixed(2) : null;
-  const handicap    = avgStrokes ? (parseFloat(avgStrokes) - PAR).toFixed(2) : null;
-  const totalVsPar  = totalStrokes - total * PAR;
+  const total      = ps.length;
+  const underPar   = ps.filter(s => s.strokes < PAR).length;
+  const penalties  = ps.filter(s => s.guesses === 0).length;
+  const bestRound  = total > 0 ? Math.min(...ps.map(s => s.strokes)) : null;
+  const avgStrokes = total > 0 ? (totalStrokes / total).toFixed(2) : null;
+  const handicap   = avgStrokes ? (parseFloat(avgStrokes) - PAR).toFixed(2) : null;
+  const totalVsPar = totalStrokes - total * PAR;
 
-  // Current streak (consecutive rounds played, any score)
   let curStreak = 0;
-  for (let i = scores.length - 1; i >= 0; i--) {
-    if (i < scores.length - 1 && scores[i].puzzle_number !== scores[i + 1].puzzle_number - 1) break;
+  for (let i = ps.length - 1; i >= 0; i--) {
+    if (i < ps.length - 1 && ps[i].puzzle_number !== ps[i + 1].puzzle_number - 1) break;
     curStreak++;
   }
-
-  // Max streak
   let maxStreak = 0, streak = 0;
-  scores.forEach((s, i) => {
-    const consec = i === 0 || s.puzzle_number === scores[i - 1].puzzle_number + 1;
-    streak = consec ? streak + 1 : 1;
+  ps.forEach((s, i) => {
+    streak = (i === 0 || s.puzzle_number === ps[i - 1].puzzle_number + 1) ? streak + 1 : 1;
     maxStreak = Math.max(maxStreak, streak);
   });
 
   return {
-    player,
+    player:         { id: player.id, name: player.name },
     total,
-    under_par:    underPar,
+    under_par:      underPar,
     penalties,
-    best_round:   bestRound,
-    avg_strokes:  avgStrokes,
+    best_round:     bestRound,
+    avg_strokes:    avgStrokes,
     handicap,
-    total_strokes: totalStrokes,
-    total_vs_par: totalVsPar,
-    season_vs_par: fmtVsPar(totalVsPar),
+    total_strokes:  totalStrokes,
+    total_vs_par:   totalVsPar,
+    season_vs_par:  fmtVsPar(totalVsPar),
     current_streak: curStreak,
     max_streak:     maxStreak,
     distribution:   dist,
   };
 }
 
+// ─── Group stats ──────────────────────────────────────────
+function getGroupStats() {
+  const { players, scores } = readDB();
+  if (!scores.length) return { total_rounds: 0, group_avg: null, best_round: null, total_birdies: 0, top_birdie_player: null };
+
+  const totalStrokes = scores.reduce((n, s) => n + s.strokes, 0);
+  const groupAvg     = (totalStrokes / scores.length).toFixed(2);
+
+  const best     = scores.reduce((b, s) => s.strokes < b.strokes || (s.strokes === b.strokes && s.created_at < b.created_at) ? s : b, scores[0]);
+  const bestName = players.find(p => p.id === best.player_id)?.name ?? 'Unknown';
+
+  const birdies   = scores.filter(s => s.strokes <= 2);
+  const birdieMap = new Map();
+  for (const s of birdies) birdieMap.set(s.player_id, (birdieMap.get(s.player_id) || 0) + 1);
+  let topBirdie = null;
+  if (birdieMap.size > 0) {
+    const [topId, topCount] = [...birdieMap.entries()].sort((a, b) => b[1] - a[1])[0];
+    topBirdie = { name: players.find(p => p.id === topId)?.name ?? 'Unknown', birdies: topCount };
+  }
+
+  return {
+    total_rounds:      scores.length,
+    group_avg:         groupAvg,
+    best_round:        { strokes: best.strokes, puzzle: best.puzzle_number, name: bestName },
+    total_birdies:     birdies.length,
+    top_birdie_player: topBirdie,
+  };
+}
+
+// ─── Season champions ─────────────────────────────────────
+function getSeasonChampions() {
+  const { players, scores } = readDB();
+  const currentPuzzle = dateToPuzzle(todayStr());
+  const champions = [];
+  for (let idx = 0; idx < 200; idx++) {
+    const start = SEASON_EPOCH + idx * SEASON_LENGTH;
+    const end   = start + SEASON_LENGTH - 1;
+    if (end >= currentPuzzle) break;
+    const ss = scores.filter(s => s.puzzle_number >= start && s.puzzle_number <= end);
+    if (!ss.length) { idx++; continue; }
+    const grouped = groupByPlayer(ss, players)
+      .sort((a, b) => a.total_strokes - b.total_strokes);
+    const top = grouped[0].total_strokes;
+    champions.push({
+      season:       idx + 1,
+      start_puzzle: start,
+      end_puzzle:   end,
+      start_date:   puzzleToDate(start),
+      end_date:     puzzleToDate(end),
+      winners: grouped.filter(r => r.total_strokes === top).map(r => ({
+        name:          r.name,
+        total_strokes: r.total_strokes,
+        rounds_played: r.rounds_played,
+        vs_par:        fmtVsPar(r.total_strokes - r.rounds_played * PAR),
+      })),
+    });
+  }
+  return champions.reverse();
+}
+
 // ─── Hall of Fame ─────────────────────────────────────────
 function getHallOfFame() {
+  const { players, scores } = readDB();
   const { start: thisWeekStart } = getWeekBounds(todayStr());
 
-  const dates = db
-    .prepare('SELECT DISTINCT date FROM scores WHERE date < ? ORDER BY date ASC')
-    .all(thisWeekStart)
-    .map(r => r.date);
-
   const weekMap = new Map();
-  for (const date of dates) {
-    const b = getWeekBounds(date);
+  for (const s of scores) {
+    if (s.date >= thisWeekStart) continue;
+    const b = getWeekBounds(s.date);
     if (!weekMap.has(b.start)) weekMap.set(b.start, b);
   }
 
-  const results = [];
-  const sortedWeeks = [...weekMap.entries()].sort((a, b) => b[0].localeCompare(a[0]));
-
-  for (const [, bounds] of sortedWeeks) {
-    const podium = db.prepare(`
-      SELECT p.id, p.name,
-             SUM(s.strokes)  AS total_strokes,
-             COUNT(s.id)     AS rounds_played
-      FROM   scores s JOIN players p ON p.id = s.player_id
-      WHERE  s.date BETWEEN ? AND ?
-      GROUP  BY p.id, p.name
-      ORDER  BY total_strokes ASC
-      LIMIT  3
-    `).all(bounds.start, bounds.end);
-
-    if (podium.length > 0) {
-      results.push({
-        week_label: weekLabel(bounds.start, bounds.end),
-        week_start: bounds.start,
-        week_end:   bounds.end,
-        podium: podium.map(p => ({
-          ...p,
-          vs_par: fmtVsPar(p.total_strokes - p.rounds_played * PAR),
-        })),
-      });
-    }
-  }
-  return results;
+  return [...weekMap.entries()]
+    .sort((a, b) => b[0].localeCompare(a[0]))
+    .map(([, bounds]) => {
+      const ws = scores.filter(s => s.date >= bounds.start && s.date <= bounds.end);
+      const podium = groupByPlayer(ws, players)
+        .sort((a, b) => a.total_strokes - b.total_strokes)
+        .slice(0, 3)
+        .map(p => ({ ...p, vs_par: fmtVsPar(p.total_strokes - p.rounds_played * PAR) }));
+      return podium.length ? { week_label: weekLabel(bounds.start, bounds.end), week_start: bounds.start, week_end: bounds.end, podium } : null;
+    })
+    .filter(Boolean);
 }
 
 // ─── Share text ───────────────────────────────────────────
 function getShareText(date) {
-  const entries  = getDailyLeaderboard(date);
-  const puzzle   = dateToPuzzle(date);
+  const entries   = getDailyLeaderboard(date);
+  const puzzle    = dateToPuzzle(date);
   const dateLabel = new Date(date + 'T12:00:00Z')
     .toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
-  const medals   = ['🥇', '🥈', '🥉'];
-
+  const medals    = ['🥇', '🥈', '🥉'];
   let text = `⛳ The Wordle Open — Round ${puzzle}\n${dateLabel}\n🏌️ Today's Scorecard:\n\n`;
   entries.forEach((e, i) => {
     const result  = e.guesses === 0 ? 'X/6' : `${e.guesses}/6`;
@@ -331,166 +365,80 @@ function getShareText(date) {
 }
 
 // ─── Playoffs ─────────────────────────────────────────────
+function _playoffWithPlayers(playoff, data) {
+  if (!playoff) return null;
+  const pps = data.playoff_players
+    .filter(pp => pp.playoff_id === playoff.id)
+    .sort((a, b) => a.status.localeCompare(b.status) || (a.elim_date || '').localeCompare(b.elim_date || ''))
+    .map(pp => ({ ...pp, name: data.players.find(p => p.id === pp.player_id)?.name ?? 'Unknown' }));
+  return { ...playoff, players: pps };
+}
 
 function getActivePlayoff() {
-  const p = db.prepare("SELECT * FROM playoffs WHERE status = 'active' LIMIT 1").get();
-  if (!p) return null;
-  const players = db.prepare(`
-    SELECT pp.player_id, pp.status, pp.elim_date, pl.name
-    FROM   playoff_players pp JOIN players pl ON pl.id = pp.player_id
-    WHERE  pp.playoff_id = ?
-    ORDER  BY pp.status ASC, pp.elim_date ASC
-  `).all(p.id);
-  return { ...p, players };
+  const data = readDB();
+  return _playoffWithPlayers(data.playoffs.find(p => p.status === 'active') ?? null, data);
 }
 
 function getCompletedPlayoffs() {
-  const list = db.prepare("SELECT * FROM playoffs WHERE status = 'complete' ORDER BY ended_date DESC").all();
-  return list.map(p => {
-    const players = db.prepare(`
-      SELECT pp.player_id, pp.status, pp.elim_date, pl.name
-      FROM   playoff_players pp JOIN players pl ON pl.id = pp.player_id
-      WHERE  pp.playoff_id = ?
-      ORDER  BY pp.status ASC, pp.elim_date ASC
-    `).all(p.id);
-    return { ...p, players };
-  });
+  const data = readDB();
+  return data.playoffs
+    .filter(p => p.status === 'complete')
+    .sort((a, b) => (b.ended_date || '').localeCompare(a.ended_date || ''))
+    .map(p => _playoffWithPlayers(p, data));
 }
 
 function checkAndStartPlayoff() {
-  // Don't start if one is already active
-  if (db.prepare("SELECT id FROM playoffs WHERE status = 'active' LIMIT 1").get()) return null;
+  const data = readDB();
+  if (data.playoffs.find(p => p.status === 'active')) return null;
 
-  const puzzleNum = dateToPuzzle(todayStr());
-  const { rows }  = getSeasonLeaderboard(puzzleNum);
-  // Require players to have completed the full season
-  const complete = rows.filter(r => r.rounds_played >= SEASON_LENGTH);
+  const puzzleNum  = dateToPuzzle(todayStr());
+  const { rows }   = getSeasonLeaderboard(puzzleNum);
+  const complete   = rows.filter(r => r.rounds_played >= SEASON_LENGTH);
   if (complete.length < 2) return null;
 
-  // Tie = identical total strokes after all 18 rounds
   const topStrokes = complete[0].total_strokes;
   const tied       = complete.filter(r => r.total_strokes === topStrokes);
   if (tied.length < 2) return null;
 
-  const today = todayStr();
-  const { lastInsertRowid: pid } = db.prepare(
-    "INSERT INTO playoffs (started_date) VALUES (?)"
-  ).run(today);
-
-  for (const p of tied) {
-    db.prepare("INSERT INTO playoff_players (playoff_id, player_id) VALUES (?,?)").run(pid, p.id);
-  }
-
+  const pid = nextId(data.playoffs);
+  data.playoffs.push({ id: pid, status: 'active', winner_id: null, started_date: todayStr(), ended_date: null, created_at: new Date().toISOString() });
+  for (const p of tied) data.playoff_players.push({ playoff_id: pid, player_id: p.id, status: 'active', elim_date: null });
+  writeDB(data);
   return getActivePlayoff();
 }
 
 function processPlayoffDay(date) {
-  const playoff = getActivePlayoff();
+  const data    = readDB();
+  const playoff = data.playoffs.find(p => p.status === 'active');
   if (!playoff) return null;
 
-  const active = playoff.players.filter(p => p.status === 'active');
-  if (active.length < 2) return null; // already resolved
+  const activePPs = data.playoff_players.filter(pp => pp.playoff_id === playoff.id && pp.status === 'active');
+  if (activePPs.length < 2) return null;
 
-  // Check all active players have posted today
-  const ids       = active.map(p => p.player_id).join(',');
-  const submitted = db.prepare(
-    `SELECT player_id, strokes FROM scores WHERE date = ? AND player_id IN (${ids})`
-  ).all(date);
-
-  if (submitted.length < active.length) return null; // waiting on someone
+  const ids       = activePPs.map(pp => pp.player_id);
+  const submitted = data.scores.filter(s => s.date === date && ids.includes(s.player_id));
+  if (submitted.length < activePPs.length) return null;
 
   const minStrokes = Math.min(...submitted.map(s => s.strokes));
   const toElim     = submitted.filter(s => s.strokes > minStrokes);
   const survivors  = submitted.filter(s => s.strokes === minStrokes);
 
-  for (const p of toElim) {
-    db.prepare(`
-      UPDATE playoff_players SET status = 'eliminated', elim_date = ?
-      WHERE  playoff_id = ? AND player_id = ?
-    `).run(date, playoff.id, p.player_id);
+  for (const s of toElim) {
+    const pp = data.playoff_players.find(x => x.playoff_id === playoff.id && x.player_id === s.player_id);
+    if (pp) { pp.status = 'eliminated'; pp.elim_date = date; }
   }
 
-  const remaining = active.length - toElim.length;
-
-  // Playoff resolved: one survivor OR two tied players who must continue
-  if (remaining === 1) {
+  if (activePPs.length - toElim.length === 1) {
     const winner = survivors[0];
-    db.prepare(
-      "UPDATE playoff_players SET status = 'winner' WHERE playoff_id = ? AND player_id = ?"
-    ).run(playoff.id, winner.player_id);
-    db.prepare(
-      "UPDATE playoffs SET status = 'complete', winner_id = ?, ended_date = ? WHERE id = ?"
-    ).run(winner.player_id, date, playoff.id);
+    const pp = data.playoff_players.find(x => x.playoff_id === playoff.id && x.player_id === winner.player_id);
+    if (pp) pp.status = 'winner';
+    playoff.status    = 'complete';
+    playoff.winner_id = winner.player_id;
+    playoff.ended_date = date;
   }
 
-  return getActivePlayoff();
-}
-
-// ─── Group stats ──────────────────────────────────────────
-function getGroupStats() {
-  const totalRounds = db.prepare('SELECT COUNT(*) AS n FROM scores').get().n;
-  const avgRow      = db.prepare('SELECT ROUND(AVG(CAST(strokes AS REAL)), 2) AS avg FROM scores').get();
-  const bestRow     = db.prepare(`
-    SELECT s.strokes, s.puzzle_number, p.name
-    FROM scores s JOIN players p ON p.id = s.player_id
-    ORDER BY s.strokes ASC, s.created_at ASC LIMIT 1
-  `).get();
-  const birdieCount = db.prepare('SELECT COUNT(*) AS n FROM scores WHERE strokes <= 2').get().n;
-  const topBirdie   = db.prepare(`
-    SELECT p.name, COUNT(*) AS birdies
-    FROM scores s JOIN players p ON p.id = s.player_id
-    WHERE s.strokes <= 2
-    GROUP BY p.id ORDER BY birdies DESC LIMIT 1
-  `).get();
-
-  return {
-    total_rounds:      totalRounds,
-    group_avg:         avgRow?.avg ?? null,
-    best_round:        bestRow ? { strokes: bestRow.strokes, puzzle: bestRow.puzzle_number, name: bestRow.name } : null,
-    total_birdies:     birdieCount,
-    top_birdie_player: topBirdie ?? null,
-  };
-}
-
-// ─── Season champions ─────────────────────────────────────
-function getSeasonChampions() {
-  const currentPuzzle = dateToPuzzle(todayStr());
-  const champions = [];
-  let idx = 0;
-  while (true) {
-    const start = SEASON_EPOCH + idx * SEASON_LENGTH;
-    const end   = start + SEASON_LENGTH - 1;
-    if (end >= currentPuzzle) break; // season still in progress or hasn't started
-    // Get all players who played this season, ranked by total strokes
-    const rows = db.prepare(`
-      SELECT p.id, p.name,
-             SUM(s.strokes)  AS total_strokes,
-             COUNT(s.id)     AS rounds_played
-      FROM scores s JOIN players p ON p.id = s.player_id
-      WHERE s.puzzle_number BETWEEN ? AND ?
-      GROUP BY p.id, p.name
-      ORDER BY total_strokes ASC
-    `).all(start, end);
-    if (rows.length > 0) {
-      const top = rows[0].total_strokes;
-      champions.push({
-        season:       idx + 1,
-        start_puzzle: start,
-        end_puzzle:   end,
-        start_date:   puzzleToDate(start),
-        end_date:     puzzleToDate(end),
-        winners:      rows.filter(r => r.total_strokes === top).map(r => ({
-          name:         r.name,
-          total_strokes: r.total_strokes,
-          rounds_played: r.rounds_played,
-          vs_par:       fmtVsPar(r.total_strokes - r.rounds_played * PAR),
-        })),
-      });
-    }
-    idx++;
-    if (idx > 200) break; // safety guard
-  }
-  return champions.reverse(); // most recent first
+  writeDB(data);
+  return _playoffWithPlayers(playoff, data);
 }
 
 module.exports = {
