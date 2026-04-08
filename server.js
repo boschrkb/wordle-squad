@@ -50,7 +50,10 @@ app.post('/api/scores', (req, res) => {
     return res.status(400).json({ error: 'guesses must be 0–6 (0 = X/6)' });
   }
   try {
-    const score        = db.submitScore(Number(player_id), Number(puzzle_number), g);
+    // Use the date the browser sent (local time) — never recompute from UTC server clock
+    const clientDate   = typeof req.body.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.body.date)
+                         ? req.body.date : null;
+    const score        = db.submitScore(Number(player_id), Number(puzzle_number), g, clientDate);
     const today        = db.getTodayDate();
     const seasonRounds = db.getPlayerSeasonRounds(Number(player_id), today);
 

@@ -112,14 +112,15 @@ function createOrGetPlayer(name) {
 }
 
 // ─── Scores ───────────────────────────────────────────────
-function submitScore(playerId, puzzleNumber, guesses) {
+function submitScore(playerId, puzzleNumber, guesses, date) {
   // Golf: strokes = guesses (1-6), or 7 for X (penalty stroke)
   const strokes = guesses === 0 ? 7 : guesses;
-  const date    = puzzleToDate(puzzleNumber);
+  // Prefer the client-supplied local date; fall back to server UTC derivation
+  const scoreDate = date || puzzleToDate(puzzleNumber);
   db.prepare(
     'INSERT INTO scores (player_id, puzzle_number, date, guesses, strokes) VALUES (?,?,?,?,?)'
-  ).run(playerId, puzzleNumber, date, guesses, strokes);
-  return { playerId, puzzleNumber, date, guesses, strokes };
+  ).run(playerId, puzzleNumber, scoreDate, guesses, strokes);
+  return { playerId, puzzleNumber, date: scoreDate, guesses, strokes };
 }
 
 function getPlayerSeasonRounds(playerId, dateStr) {

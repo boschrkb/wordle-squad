@@ -275,7 +275,9 @@ document.getElementById('score-form').addEventListener('submit', async e => {
   try {
     const result = await apiFetch('/api/scores', {
       method: 'POST',
-      body: JSON.stringify({ player_id: playerId, puzzle_number: puzzleNum, guesses }),
+      // Send the browser's local date so the server never has to derive it from UTC
+      body: JSON.stringify({ player_id: playerId, puzzle_number: puzzleNum, guesses,
+                             date: dateFromPuzzle(puzzleNum) }),
     });
     const strokes = guesses === 0 ? 7 : guesses;
     showFormMsg(`Posted! ${fmtGuesses(guesses)} · ${shotName(strokes)} (${fmtVsPar(strokes - 4)}) 🏌️`, 'success');
