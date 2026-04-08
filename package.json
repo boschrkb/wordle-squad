@@ -1,0 +1,14 @@
+{
+  "name": "wordle-squad",
+  "version": "1.0.0",
+  "description": "Real-time Wordle score tracker for friend groups",
+  "main": "server.js",
+  "scripts": {
+    "start": "node --no-warnings=ExperimentalWarning server.js",
+    "dev": "npx nodemon --exec 'node --no-warnings=ExperimentalWarning' server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "socket.io": "^4.7.4"
+  }
+}

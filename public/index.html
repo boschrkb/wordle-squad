@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#0d1f0d">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>The Wordle Open ⛳</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- ═══ HEADER ═══════════════════════════════════════════ -->
+  <header>
+    <div class="header-inner">
+      <div class="brand">
+        <span class="brand-flag">⛳</span>
+        <div class="brand-text">
+          <div class="brand-sub">THE</div>
+          <div class="brand-name">WORDLE OPEN</div>
+        </div>
+      </div>
+      <div class="live-pill">
+        <span class="live-dot"></span>LIVE
+      </div>
+    </div>
+    <div class="header-date" id="header-date">Loading…</div>
+  </header>
+
+  <!-- ═══ TAB NAV ══════════════════════════════════════════ -->
+  <nav class="tab-nav" role="tablist">
+    <button class="tab-btn active" data-tab="today"    role="tab">🏌️ Today's Round</button>
+    <button class="tab-btn"        data-tab="season"   role="tab">⛳ The Season</button>
+    <button class="tab-btn"        data-tab="scorecard" role="tab">📊 Scoreboard</button>
+    <button class="tab-btn"        data-tab="stats"    role="tab">🎯 My Scorecard</button>
+    <button class="tab-btn"        data-tab="locker"   role="tab">🏆 Champions</button>
+  </nav>
+
+  <main>
+
+    <!-- ═══════════════════ TODAY'S ROUND ═══════════════════ -->
+    <section id="tab-today" class="tab-section active">
+
+      <!-- Paste / Log card -->
+      <div class="card">
+        <div class="card-title">⛳ Log Your Round</div>
+
+        <!-- Paste button -->
+        <button id="paste-btn" class="btn btn-paste btn-full">
+          📋 Paste from Wordle
+        </button>
+        <div id="paste-detection" class="paste-detection hidden"></div>
+        <div class="divider"><span>or enter manually</span></div>
+
+        <form id="score-form" autocomplete="off">
+          <div class="form-group">
+            <label for="player-select">Golfer</label>
+            <div class="input-row">
+              <select id="player-select">
+                <option value="">Select golfer…</option>
+              </select>
+              <button type="button" id="add-player-btn" class="icon-btn" title="Add golfer">＋</button>
+            </div>
+            <div id="new-player-wrap" class="new-player-wrap hidden">
+              <input type="text" id="new-player-name" placeholder="Golfer name…" maxlength="30" spellcheck="false">
+              <button type="button" id="save-player-btn" class="btn btn-gold btn-sm">Save</button>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="result-select">Result</label>
+            <select id="result-select">
+              <option value="1">⛳ 1/6 — Hole in One!</option>
+              <option value="2">🦅 2/6 — Eagle  (−2)</option>
+              <option value="3">🐦 3/6 — Birdie (−1)</option>
+              <option value="4" selected>4/6 — Par</option>
+              <option value="5">5/6 — Bogey   (+1)</option>
+              <option value="6">6/6 — Dbl Bogey (+2)</option>
+              <option value="0">💀 X/6 — Penalty (+3)</option>
+            </select>
+          </div>
+
+          <!-- Hidden puzzle number, driven by paste or today default -->
+          <input type="hidden" id="puzzle-number">
+
+          <button type="submit" id="submit-btn" class="btn btn-gold btn-full">
+            🏌️ Post Score
+          </button>
+          <div id="form-msg" class="form-msg hidden"></div>
+        </form>
+      </div>
+
+      <!-- Daily scoreboard -->
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">🟢 The Green</span>
+          <span id="round-badge" class="badge">Round —</span>
+        </div>
+        <div id="daily-leaderboard"><div class="state-msg">No scores yet — first on the tee! ⛳</div></div>
+        <button id="share-btn" class="btn btn-whatsapp btn-full share-btn">
+          📤 Share Scorecard to WhatsApp
+        </button>
+      </div>
+
+    </section>
+
+    <!-- ═══════════════════ THE SEASON ═══════════════════ -->
+    <section id="tab-season" class="tab-section hidden">
+      <div class="season-banner">
+        <div class="season-banner-title">⛳ 18-Round Rolling Season</div>
+        <div id="season-range" class="season-banner-range"></div>
+      </div>
+
+      <div id="season-podium"></div>
+
+      <div class="card">
+        <div class="card-title">🏆 Season Standings</div>
+        <div class="scoreboard-header">
+          <span>POS</span><span>GOLFER</span><span>ROUNDS</span><span>SCORE</span>
+        </div>
+        <div id="season-leaderboard"><div class="state-msg">Loading…</div></div>
+      </div>
+    </section>
+
+    <!-- ═══════════════════ SCOREBOARD ═══════════════════ -->
+    <section id="tab-scorecard" class="tab-section hidden">
+      <div class="sub-tab-bar">
+        <button class="sub-tab active" data-sub="monthly">This Month</button>
+        <button class="sub-tab"        data-sub="alltime">All Time</button>
+      </div>
+      <div class="scoreboard-header">
+        <span>POS</span><span>GOLFER</span><span>ROUNDS</span><span>AVG</span>
+      </div>
+      <div id="sub-monthly" class="sub-panel active">
+        <div id="monthly-leaderboard"><div class="state-msg">Loading…</div></div>
+      </div>
+      <div id="sub-alltime" class="sub-panel hidden">
+        <div id="alltime-leaderboard"><div class="state-msg">Loading…</div></div>
+      </div>
+    </section>
+
+    <!-- ═══════════════════ MY SCORECARD ═══════════════════ -->
+    <section id="tab-stats" class="tab-section hidden">
+      <div class="card">
+        <div class="card-title">🎯 Player Scorecard</div>
+        <select id="stats-player-select">
+          <option value="">Select a golfer…</option>
+        </select>
+      </div>
+      <div id="player-stats" class="hidden">
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-val" id="st-rounds">—</div>
+            <div class="stat-lbl">Rounds</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-val handicap" id="st-handicap">—</div>
+            <div class="stat-lbl">Handicap</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-val" id="st-best">—</div>
+            <div class="stat-lbl">Best Round</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-val under" id="st-under">—</div>
+            <div class="stat-lbl">Under Par</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-val" id="st-streak">—</div>
+            <div class="stat-lbl">Streak</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-val" id="st-vspar">—</div>
+            <div class="stat-lbl">Total vs Par</div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">🏌️ Stroke Frequency</div>
+          <div id="guess-dist"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════════════════ CHAMPIONS ═══════════════════ -->
+    <section id="tab-locker" class="tab-section hidden">
+      <div class="locker-banner">🏆 Champions Locker Room</div>
+      <div id="hall-of-fame"><div class="state-msg">Loading…</div></div>
+    </section>
+
+  </main>
+
+  <!-- ═══ 18th HOLE CELEBRATION ════════════════════════════ -->
+  <div id="celebration-overlay" class="celebration-overlay hidden">
+    <div class="celebration-card">
+      <div class="cele-emoji">🏌️</div>
+      <div class="cele-title">18TH HOLE COMPLETE!</div>
+      <div class="cele-sub">You've played all 18 rounds of the season!</div>
+      <div class="cele-name" id="cele-name"></div>
+      <div class="cele-score" id="cele-score"></div>
+      <button class="btn btn-gold" onclick="closeCelebration()">
+        🏆 Accept the Green Jacket
+      </button>
+    </div>
+    <div class="confetti-wrap" id="confetti-wrap"></div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
