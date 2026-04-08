@@ -29,6 +29,27 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_scores_player ON scores(player_id);
 `);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS playoffs (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    status       TEXT NOT NULL DEFAULT 'active',   -- 'active' | 'complete'
+    winner_id    INTEGER,
+    started_date TEXT NOT NULL,
+    ended_date   TEXT,
+    created_at   TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS playoff_players (
+    playoff_id INTEGER NOT NULL,
+    player_id  INTEGER NOT NULL,
+    status     TEXT NOT NULL DEFAULT 'active',     -- 'active' | 'eliminated' | 'winner'
+    elim_date  TEXT,
+    PRIMARY KEY (playoff_id, player_id),
+    FOREIGN KEY (playoff_id) REFERENCES playoffs(id),
+    FOREIGN KEY (player_id)  REFERENCES players(id)
+  );
+`);
+
 // ─── Helpers ──────────────────────────────────────────────
 const WORDLE_EPOCH = new Date('2021-06-19T12:00:00Z').getTime();
 const DAY_MS = 86400000;
@@ -305,6 +326,101 @@ function getShareText(date) {
   return text;
 }
 
+// ─── Playoffs ─────────────────────────────────────────────
+
+function getActivePlayoff() {
+  const p = db.prepare("SELECT * FROM playoffs WHERE status = 'active' LIMIT 1").get();
+  if (!p) return null;
+  const players = db.prepare(`
+    SELECT pp.player_id, pp.status, pp.elim_date, pl.name
+    FROM   playoff_players pp JOIN players pl ON pl.id = pp.player_id
+    WHERE  pp.playoff_id = ?
+    ORDER  BY pp.status ASC, pp.elim_date ASC
+  `).all(p.id);
+  return { ...p, players };
+}
+
+function getCompletedPlayoffs() {
+  const list = db.prepare("SELECT * FROM playoffs WHERE status = 'complete' ORDER BY ended_date DESC").all();
+  return list.map(p => {
+    const players = db.prepare(`
+      SELECT pp.player_id, pp.status, pp.elim_date, pl.name
+      FROM   playoff_players pp JOIN players pl ON pl.id = pp.player_id
+      WHERE  pp.playoff_id = ?
+      ORDER  BY pp.status ASC, pp.elim_date ASC
+    `).all(p.id);
+    return { ...p, players };
+  });
+}
+
+function checkAndStartPlayoff() {
+  // Don't start if one is already active
+  if (db.prepare("SELECT id FROM playoffs WHERE status = 'active' LIMIT 1").get()) return null;
+
+  const { rows } = getSeasonLeaderboard();
+  // Require players to have completed the full 18-round season
+  const complete = rows.filter(r => r.rounds_played >= 18);
+  if (complete.length < 2) return null;
+
+  // Compare avg_strokes rounded to 2dp (as stored)
+  const topAvg = Math.round(parseFloat(complete[0].avg_strokes) * 100);
+  const tied   = complete.filter(r => Math.round(parseFloat(r.avg_strokes) * 100) === topAvg);
+  if (tied.length < 2) return null;
+
+  const today = todayStr();
+  const { lastInsertRowid: pid } = db.prepare(
+    "INSERT INTO playoffs (started_date) VALUES (?)"
+  ).run(today);
+
+  for (const p of tied) {
+    db.prepare("INSERT INTO playoff_players (playoff_id, player_id) VALUES (?,?)").run(pid, p.id);
+  }
+
+  return getActivePlayoff();
+}
+
+function processPlayoffDay(date) {
+  const playoff = getActivePlayoff();
+  if (!playoff) return null;
+
+  const active = playoff.players.filter(p => p.status === 'active');
+  if (active.length < 2) return null; // already resolved
+
+  // Check all active players have posted today
+  const ids       = active.map(p => p.player_id).join(',');
+  const submitted = db.prepare(
+    `SELECT player_id, strokes FROM scores WHERE date = ? AND player_id IN (${ids})`
+  ).all(date);
+
+  if (submitted.length < active.length) return null; // waiting on someone
+
+  const minStrokes = Math.min(...submitted.map(s => s.strokes));
+  const toElim     = submitted.filter(s => s.strokes > minStrokes);
+  const survivors  = submitted.filter(s => s.strokes === minStrokes);
+
+  for (const p of toElim) {
+    db.prepare(`
+      UPDATE playoff_players SET status = 'eliminated', elim_date = ?
+      WHERE  playoff_id = ? AND player_id = ?
+    `).run(date, playoff.id, p.player_id);
+  }
+
+  const remaining = active.length - toElim.length;
+
+  // Playoff resolved: one survivor OR two tied players who must continue
+  if (remaining === 1) {
+    const winner = survivors[0];
+    db.prepare(
+      "UPDATE playoff_players SET status = 'winner' WHERE playoff_id = ? AND player_id = ?"
+    ).run(playoff.id, winner.player_id);
+    db.prepare(
+      "UPDATE playoffs SET status = 'complete', winner_id = ?, ended_date = ? WHERE id = ?"
+    ).run(winner.player_id, date, playoff.id);
+  }
+
+  return getActivePlayoff();
+}
+
 module.exports = {
   getPlayers,
   createOrGetPlayer,
@@ -321,4 +437,8 @@ module.exports = {
   getPlayerStats,
   getHallOfFame,
   getShareText,
+  getActivePlayoff,
+  getCompletedPlayoffs,
+  checkAndStartPlayoff,
+  processPlayoffDay,
 };

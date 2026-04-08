@@ -34,6 +34,7 @@
     <button class="tab-btn"        data-tab="scorecard" role="tab">📊 Scoreboard</button>
     <button class="tab-btn"        data-tab="stats"    role="tab">🎯 My Scorecard</button>
     <button class="tab-btn"        data-tab="locker"   role="tab">🏆 Champions</button>
+    <button class="tab-btn"        data-tab="rules"    role="tab">📋 Rules</button>
   </nav>
 
   <main>
@@ -106,6 +107,7 @@
 
     <!-- ═══════════════════ THE SEASON ═══════════════════ -->
     <section id="tab-season" class="tab-section hidden">
+      <div id="playoff-banner" class="hidden"></div>
       <div class="season-banner">
         <div class="season-banner-title">⛳ 18-Round Rolling Season</div>
         <div id="season-range" class="season-banner-range"></div>
@@ -185,6 +187,93 @@
     <section id="tab-locker" class="tab-section hidden">
       <div class="locker-banner">🏆 Champions Locker Room</div>
       <div id="hall-of-fame"><div class="state-msg">Loading…</div></div>
+    </section>
+
+    <!-- ═══════════════════ RULES ═══════════════════════ -->
+    <section id="tab-rules" class="tab-section hidden">
+
+      <div class="rules-header">
+        <div class="rules-crest">⛳</div>
+        <div class="rules-club">THE AUGUSTA WORDLE COMMITTEE</div>
+        <div class="rules-title">THE WORDLE OPEN</div>
+        <div class="rules-subtitle">Official Rules &amp; Regulations</div>
+        <div class="rules-edition">Est. 2021 · All rights reserved · Appeals not accepted</div>
+      </div>
+
+      <div class="rule-card">
+        <div class="rule-num">RULE 1</div>
+        <div class="rule-heading">The Season 🗓️</div>
+        <p>The Wordle Open is contested over an <strong>18-round rolling season</strong>. Each day's Wordle is one round. The season window advances daily — every sunrise brings a new hole and drops the oldest from the card.</p>
+        <p>There is no off-season. There is no mercy.</p>
+      </div>
+
+      <div class="rule-card">
+        <div class="rule-num">RULE 2</div>
+        <div class="rule-heading">Scoring 🏌️</div>
+        <p>Your guess count is your stroke count. <strong>Low score wins.</strong> This is golf.</p>
+        <div class="score-table">
+          <div class="score-row eagle"><span>⛳ 1/6</span><span>Hole in One</span><span>−3</span></div>
+          <div class="score-row eagle"><span>🦅 2/6</span><span>Eagle</span><span>−2</span></div>
+          <div class="score-row birdie"><span>🐦 3/6</span><span>Birdie</span><span>−1</span></div>
+          <div class="score-row par"><span>⚪ 4/6</span><span>Par</span><span>E</span></div>
+          <div class="score-row bogey"><span>😬 5/6</span><span>Bogey</span><span>+1</span></div>
+          <div class="score-row double"><span>😰 6/6</span><span>Double Bogey</span><span>+2</span></div>
+          <div class="score-row penalty"><span>💀 X/6</span><span>Penalty Stroke</span><span>+3</span></div>
+        </div>
+        <p class="rules-note">* Failed puzzles count as 7 strokes. The course does not care about your feelings.</p>
+      </div>
+
+      <div class="rule-card">
+        <div class="rule-num">RULE 3</div>
+        <div class="rule-heading">Par 🟢</div>
+        <p>Par is <strong>4 strokes per round</strong>, making the full 18-hole season par <strong>72</strong>.</p>
+        <p>Finish under 72 and you are among the greats. Finish over 72 and we don't talk about it at dinner.</p>
+      </div>
+
+      <div class="rule-card">
+        <div class="rule-num">RULE 4</div>
+        <div class="rule-heading">Weekly Champion 🏆</div>
+        <p>The player with the <strong>lowest total strokes</strong> each week earns a place in the <em>Champions Locker Room</em> — the most prestigious hall in recreational Wordle history.</p>
+        <p>Weekly glory is fleeting. Season glory is eternal.</p>
+      </div>
+
+      <div class="rule-card highlight">
+        <div class="rule-num">RULE 5</div>
+        <div class="rule-heading">Sudden Death Playoff ⚡</div>
+        <p>If two or more players finish the 18-round season with an <strong>identical average score</strong>, a sudden death playoff commences immediately within normal daily play. No additional rounds are scheduled. Life continues. So does the tournament.</p>
+        <p>Playoff rounds are the same daily Wordle, played under the full weight of competitive pressure.</p>
+      </div>
+
+      <div class="rule-card highlight">
+        <div class="rule-num">RULE 6</div>
+        <div class="rule-heading">Playoff Elimination 🔴</div>
+        <p>In a <strong>3-way (or more) playoff</strong>, any player who scores higher than the lowest score that day is <strong>immediately eliminated</strong>.</p>
+        <div class="rules-example">
+          <div class="ex-title">EXAMPLE</div>
+          <div class="ex-body">
+            Day 1 — Alice: 2 · Bob: 2 · Charlie: 4<br>
+            → Charlie eliminated (scored above the low of 2)<br>
+            → Alice and Bob continue to Day 2<br><br>
+            Day 2 — Alice: 3 · Bob: 5<br>
+            → Bob eliminated · <strong>Alice wins the season 🏆</strong>
+          </div>
+        </div>
+        <p class="rules-note">⚠️ Once eliminated you <strong>cannot re-enter the playoff</strong>. The Committee is not accepting appeals, emails, or phone calls at this time.</p>
+      </div>
+
+      <div class="rule-card">
+        <div class="rule-num">RULE 7</div>
+        <div class="rule-heading">The Green Jacket 🏌️</div>
+        <p>The season champion receives <strong>eternal glory</strong>, their name immortalised in the Champions Locker Room, and the unspoken respect of their peers for a period not to exceed one calendar week.</p>
+        <p>The Committee congratulates all participants on their participation.</p>
+      </div>
+
+      <div class="rules-footer">
+        <div>⛳ Good luck. Keep your head down.</div>
+        <div>🌿 Mind the rough. Play the ball as it lies.</div>
+        <div class="rules-footer-sub">The Augusta Wordle Committee · All rulings are final</div>
+      </div>
+
     </section>
 
   </main>

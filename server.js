@@ -16,6 +16,7 @@ function broadcast() {
   io.emit('update', {
     daily:         db.getDailyLeaderboard(today),
     season:        db.getSeasonLeaderboard(),
+    playoff:       db.getActivePlayoff(),
     puzzle_number: db.getTodayPuzzleNumber(),
     today_date:    today,
   });
@@ -49,9 +50,14 @@ app.post('/api/scores', (req, res) => {
     return res.status(400).json({ error: 'guesses must be 0–6 (0 = X/6)' });
   }
   try {
-    const score = db.submitScore(Number(player_id), Number(puzzle_number), g);
-    const today = db.getTodayDate();
+    const score        = db.submitScore(Number(player_id), Number(puzzle_number), g);
+    const today        = db.getTodayDate();
     const seasonRounds = db.getPlayerSeasonRounds(Number(player_id), today);
+
+    // Playoff: check if season just completed with a tie, then resolve today's playoff day
+    db.checkAndStartPlayoff();
+    db.processPlayoffDay(score.date);
+
     broadcast();
     res.json({ ...score, completed_18th: seasonRounds === 18 });
   } catch (e) {
@@ -88,6 +94,15 @@ app.get('/api/players/:id/stats', (req, res) => {
   const stats = db.getPlayerStats(parseInt(req.params.id));
   if (!stats) return res.status(404).json({ error: 'Player not found' });
   res.json(stats);
+});
+
+// ── Playoffs ──────────────────────────────────────────────
+
+app.get('/api/playoff', (_req, res) => {
+  res.json({
+    active:    db.getActivePlayoff(),
+    completed: db.getCompletedPlayoffs(),
+  });
 });
 
 // ── Hall of Fame ──────────────────────────────────────────

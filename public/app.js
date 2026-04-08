@@ -108,6 +108,8 @@ socket.on('update', data => {
     S.seasonData = data.season;
     if (S.activeTab === 'season') renderSeason(data.season);
   }
+  // Always update playoff banner if visible
+  renderPlayoffBanner(data.playoff ?? null);
 });
 
 function setLive(on) {
@@ -142,6 +144,7 @@ function switchTab(name) {
   if (name === 'season')    loadSeason();
   if (name === 'scorecard') loadScorecard();
   if (name === 'locker' && !S.fameLoaded) loadFame();
+  // rules tab is static HTML — nothing to load
 }
 
 // Sub-tabs
@@ -375,11 +378,53 @@ document.getElementById('share-btn').addEventListener('click', async () => {
   }
 });
 
+// ─── Playoff banner ───────────────────────────────────────
+function renderPlayoffBanner(playoff) {
+  const el = document.getElementById('playoff-banner');
+  if (!el) return;
+  if (!playoff) { el.classList.add('hidden'); return; }
+
+  const icons = { active: '⚡', eliminated: '❌', winner: '🏆' };
+  const active    = playoff.players.filter(p => p.status === 'active');
+  const elim      = playoff.players.filter(p => p.status === 'eliminated');
+  const winner    = playoff.players.find(p => p.status === 'winner');
+  const isOver    = playoff.status === 'complete';
+
+  el.innerHTML = `
+    <div class="playoff-banner">
+      <div class="playoff-title">
+        ${isOver ? '🏆 PLAYOFF COMPLETE' : '⚡ SUDDEN DEATH PLAYOFF IN PROGRESS'}
+      </div>
+      <div class="playoff-players">
+        ${playoff.players.map(p => `
+          <div class="playoff-player ${p.status}">
+            <div class="playoff-dot ${p.status}"></div>
+            <span>${icons[p.status]} ${esc(p.name)}</span>
+            ${p.status === 'eliminated'
+              ? `<span class="playoff-elim-note">eliminated ${p.elim_date ?? ''}</span>`
+              : p.status === 'winner'
+              ? `<span class="playoff-elim-note">🏆 CHAMPION</span>`
+              : `<span class="playoff-elim-note">still in</span>`
+            }
+          </div>`).join('')}
+      </div>
+      ${!isOver && active.length >= 2 ? `
+        <div style="font-size:11px;color:var(--muted);margin-top:10px;text-align:center">
+          Highest scorer each day is eliminated · ${active.length} golfer${active.length !== 1 ? 's' : ''} remain
+        </div>` : ''}
+    </div>`;
+  el.classList.remove('hidden');
+}
+
 // ─── Season ───────────────────────────────────────────────
 function loadSeason() {
   if (S.seasonData) renderSeason(S.seasonData);
   apiFetch('/api/leaderboard/season')
     .then(data => { S.seasonData = data; renderSeason(data); })
+    .catch(() => {});
+  // Also fetch and render playoff status
+  apiFetch('/api/playoff')
+    .then(({ active }) => renderPlayoffBanner(active))
     .catch(() => {});
 }
 
