@@ -3,11 +3,15 @@
   "version": "1.0.0",
   "description": "Real-time Wordle score tracker for friend groups",
   "main": "server.js",
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "scripts": {
-    "start": "node --no-warnings=ExperimentalWarning server.js",
-    "dev": "npx nodemon --exec 'node --no-warnings=ExperimentalWarning' server.js"
+    "start": "node server.js",
+    "dev": "npx nodemon server.js"
   },
   "dependencies": {
+    "better-sqlite3": "^9.6.0",
     "express": "^4.18.2",
     "socket.io": "^4.7.4"
   }
