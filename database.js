@@ -1,8 +1,18 @@
 // Uses Node 22+ built-in SQLite (no native compilation needed)
 const { DatabaseSync } = require('node:sqlite');
 const path = require('path');
+const fs   = require('fs');
 
-const db = new DatabaseSync(path.join(__dirname, 'wordle-open.db'));
+// DB lives in ./data/ — survives restarts, git pulls, and npm installs.
+// Override with DB_PATH env var for cloud deployments with a persistent volume.
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
+const DB_PATH  = process.env.DB_PATH  || path.join(DATA_DIR, 'wordle-open.db');
+
+// Create data directory if it doesn't exist (never drops existing data)
+fs.mkdirSync(DATA_DIR, { recursive: true });
+
+console.log(`[db] Using database at: ${DB_PATH}`);
+const db = new DatabaseSync(DB_PATH);
 
 db.exec('PRAGMA journal_mode = WAL');
 db.exec('PRAGMA foreign_keys = ON');

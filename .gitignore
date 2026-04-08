@@ -1,6 +1,14 @@
 node_modules/
+
+# Database files — stored in data/ which is tracked, but the files themselves are not
+data/*.db
+data/*.db-shm
+data/*.db-wal
+
+# Legacy DB files in project root (safe to delete once migrated)
 *.db
 *.db-shm
 *.db-wal
+
 .DS_Store
 .env
